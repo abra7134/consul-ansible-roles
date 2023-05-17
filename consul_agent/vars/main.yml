@@ -1,0 +1,17 @@
+---
+# The paths to backups, configuration and data directories on host
+_consul_agent_base_dir: /opt/consul-agent
+_consul_agent_backups_dir: "{{ _consul_agent_base_dir }}/backups"
+_consul_agent_config_dir: "{{ _consul_agent_base_dir }}/config"
+_consul_agent_data_dir: "{{ _consul_agent_base_dir }}/data"
+
+# The paths to wrapper and backup scripts
+_consul_agent_wrapper_path: /usr/local/sbin/consul
+_consul_agent_backup_script_path: /usr/local/sbin/consul_backup
+
+# The UID and GID of 'consul' system user
+_consul_agent_user_uid: 8500
+_consul_agent_user_gid: 8500
+
+# The docker image used for run consul agent
+_consul_agent_docker_image: consul:1.13.6

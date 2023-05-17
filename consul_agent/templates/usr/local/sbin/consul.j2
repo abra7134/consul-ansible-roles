@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+{{ ansible_managed | comment }}
+
+# The wrapper to easy exec 'consul' binary from docker image
+
+if [[ "${@}" =~ [[:space:]]/[^[:space:]] ]]
+then
+  echo >&2 "!!! This wrapper-script doesn't support an absolute file path specification"
+  echo >&2 "!!! Please change the working directory and try again with local file path"
+  exit 1
+fi
+
+/usr/bin/docker \
+  run \
+{% if consul_agent_acl_enabled %}
+{% if consul_agent_is_server %}
+  --env CONSUL_HTTP_TOKEN="{{ consul_agent_server_initial_token }}" \
+{% else %}
+  --env CONSUL_HTTP_TOKEN="{{ consul_agent_token }}" \
+{% endif %}
+{% endif %}
+  --env CONSUL_UID=$(id -u) \
+  --env CONSUL_GID=$(id -g) \
+  --rm \
+  --network host \
+  --volume ${PWD}:/mount:rw \
+  --workdir /mount \
+  {{ _consul_agent_docker_image }} \
+  consul \
+  "${@}"

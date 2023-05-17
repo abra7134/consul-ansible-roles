@@ -1,0 +1,56 @@
+---
+# THIS CLUSTER
+
+# Name of cluster datacenter
+consul_cluster_datacenter: dc1
+# List of nodes that will be joined into a cluster
+consul_cluster_nodes: "{{ ansible_play_hosts }}"
+
+# OTHER CLUSTERS TO CONNECT
+
+# The name of primary datacenter if this datacenter is secondary
+# If the data center is the only one, then you can leave empty
+consul_cluster_primary_datacenter: ""
+# Specify the list of node to secondary datacenter's bootstrap
+consul_cluster_wan_nodes: []
+
+# DEBUG
+
+# Enable additional debug tasks with some variables
+consul_cluster_role_debug: no
+# Run the 'traefik' proxy to easly access to consul with a special read-only token
+consul_cluster_use_traefik_for_ui: yes
+
+# BACKUP
+
+# The timer specification of backup running (see man systemd.time)
+consul_cluster_backup_timer_spec: daily
+# The number of backups will be always keeped
+consul_cluster_backups_keep_count: 10
+
+# TOKENS
+
+# The master (with all privileges) predefined token
+consul_cluster_super_token: ""
+# The replication predefined token
+consul_cluster_replication_token: ""
+
+# The list of users tokens
+consul_cluster_tokens: {}
+  # For example
+  #
+  # token-1:
+  #   token: 0b3642b8-984e-4c45-bd30-069f9fd97e96
+  #   rules: |                                          <- Policy format see at
+  #     service_prefix "" { policy = "read" }              https://developer.hashicorp.com/consul/docs/security/acl/acl-policies#policy-format
+  #     key_prefix "" { policy = "read" }
+  #     node_prefix "" { policy = "read" }
+
+  # token-2:
+  #   token: 99d4610c-e993-4395-bf45-232184802b35
+  #   expirationttl: 10m                                <- After the specified time, the token will be deleted
+  #   local: yes                                        <- Token will be valid on only for consul_cluster_datacenter
+  #   rules:                                            <- When the rules are specified,
+  #     service_prefix "" { policy = "read" }              a policy with 'token-2-policy' name will be created
+  #     key_prefix "" { policy = "read" }
+  #     node_prefix "" { policy = "read" }

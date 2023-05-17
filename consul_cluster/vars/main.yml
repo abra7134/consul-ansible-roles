@@ -1,0 +1,33 @@
+---
+#  The docker image used for run traefik proxy
+_consul_cluster_traefik_docker_image: traefik:2.9.5
+
+# INTERNAL TOKENS
+
+# Token, it name and policy rules of system token of cluster consul agent itself
+_consul_cluster_agent_token_name: cluster-agent
+_consul_cluster_agent_token: "{{ 2048 | random(seed=group_names | join(',')) | to_uuid }}"
+_consul_cluster_agent_policy_rules: |
+  {% for node in consul_cluster_nodes %}
+  node "{{ node }}" { policy = "write" }
+  {% endfor %}
+  service "consul" { policy = "write" }
+
+# Token for replication one datacenter to another datacenters
+_consul_cluster_replication_token_name: replication
+_consul_cluster_replication_token: "{{ consul_cluster_replication_token }}"
+_consul_cluster_replication_policy_rules: |
+  acl = "write"
+  operator = "write"
+  service_prefix "" {
+    policy = "read"
+    intentions = "read"
+  }
+
+# Token, it name and policy rules of traefik
+_consul_cluster_traefik_token_name: traefik
+_consul_cluster_traefik_token: "{{ 1024 | random(seed=group_names | join(',')) | to_uuid }}"
+_consul_cluster_traefik_policy_rules: |
+  key_prefix "" { policy = "read" }
+  node_prefix "" { policy = "read" }
+  service_prefix "" { policy = "read" }

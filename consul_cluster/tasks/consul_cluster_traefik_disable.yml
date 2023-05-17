@@ -1,0 +1,25 @@
+---
+- name: "traefik_disable : Ensure 'traefik' service is stopped"
+  ansible.builtin.systemd:
+    name: traefik.service
+    daemon_reload: yes
+    enabled: no
+    state: stopped
+  ignore_errors: yes
+
+- name: "traefik_disable : Ensure absent systemd'es services"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/traefik.service
+
+- name: "traefik_disable : Ensure 'traefik' container is absent"
+  community.docker.docker_container_info:
+    name: traefik
+  register: __traefik_status
+  until:
+    - not __traefik_status.exists
+  # Pause is required to check correctly if the docker-image is loaded
+  delay: 5
+  retries: 12

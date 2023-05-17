@@ -1,0 +1,66 @@
+{{ ansible_managed | comment }}
+
+{% if consul_agent_acl_enabled %}
+acl {
+  enabled = true
+{% if consul_agent_is_server %}
+{% if consul_agent_primary_datacenter not in ("", consul_agent_datacenter) %}
+  enable_token_replication = {{ consul_agent_server_enable_token_replication | ternary('true', 'false') }}
+{% else %}
+  enable_token_persistence = true
+{% endif %}
+{% endif %}
+  default_policy = "deny"
+  tokens {
+    agent = "{{ consul_agent_token }}"
+{% if consul_agent_is_server %}
+{% if consul_agent_primary_datacenter not in ("", consul_agent_datacenter) %}
+    replication = "{{ consul_agent_server_replication_token }}"
+{% elif consul_agent_server_enable_token_replication %}
+    initial_management = "{{ consul_agent_server_initial_token }}"
+{% endif %}
+{% endif %}
+  }
+}
+{% endif %}
+
+bind_addr = "{{ ansible_default_ipv4.address }}"
+{% if consul_agent_is_server %}
+client_addr = "0.0.0.0"
+{% else %}
+client_addr = "127.0.0.1"
+{% endif %}
+datacenter = "{{ consul_agent_datacenter }}"
+{% if consul_agent_primary_datacenter not in ("", consul_agent_datacenter) %}
+primary_datacenter = "{{ consul_agent_primary_datacenter }}"
+{% endif %}
+data_dir = "/fake-value-only-for-validate-config"
+log_level = "INFO"
+log_json = true
+ports {
+  dns = -1
+}
+
+{% if consul_agent_is_server %}
+server = true
+bootstrap_expect = {{ consul_agent_server_start_join | count }}
+start_join = {{ consul_agent_server_start_join | to_nice_json }}
+start_join_wan = {{ consul_agent_server_start_join_wan | to_nice_json }}
+{% else %}
+retry_join = {{ consul_agent_retry_join | to_nice_json }}
+{% endif %}
+
+# !!! VERY important parameters for correct work monitoring system when consul-agent was stopped,
+#     it's important that the registration of services remains in the consul's catalog
+skip_leave_on_interrupt = true
+leave_on_terminate = false
+
+disable_update_check = true
+telemetry {
+  disable_hostname = true
+  prometheus_retention_time = "72h"
+}
+
+ui_config {
+  enabled = {{ consul_agent_is_server | ternary('true', 'false') }}
+}

@@ -1,0 +1,4 @@
+---
+- ansible.builtin.import_tasks: consul_cluster.yml
+  tags:
+    - consul_cluster

@@ -1,0 +1,29 @@
+---
+- name: "traefik_enable : Ensure systemd'es services"
+  ansible.builtin.template:
+    src: "{{ item.lstrip('/') }}.j2"
+    dest: "{{ item }}"
+  loop:
+    - /etc/systemd/system/traefik.service
+  notify: Restart 'traefik' service
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: "traefik_enable : Ensure 'traefik' service is started"
+  ansible.builtin.systemd:
+    name: traefik.service
+    daemon_reload: yes
+    enabled: yes
+    state: started
+
+- name: "traefik_enable : Ensure 'traefik' container is running"
+  community.docker.docker_container_info:
+    name: traefik
+  register: __traefik_status
+  until:
+    - __traefik_status.exists
+    - __traefik_status.container.State.Running
+  # Pause is required to check correctly if the docker-image is loaded
+  delay: 5
+  retries: 12

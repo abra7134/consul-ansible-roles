@@ -1,0 +1,34 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description="HashiCorp Consul - A service mesh solution"
+Documentation=https://www.consul.io/
+Requires=docker.service
+After=docker.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm --force %N
+ExecStart=/usr/bin/docker run \
+  --name=%N \
+  --env CONSUL_CONFIG_DIR={{ _consul_agent_config_dir | quote }} \
+  --env CONSUL_DATA_DIR={{ _consul_agent_data_dir | quote }} \
+  --env CONSUL_UID={{ _consul_agent_user_uid | quote }} \
+  --env CONSUL_GID={{ _consul_agent_user_gid | quote }} \
+{% for label_name, label_value in consul_agent_docker_labels.items() %}
+  --label={{ label_name }}={{ label_value | quote }} \
+{% endfor %}
+  --rm=true \
+  --network=host \
+  --stop-timeout=60 \
+  --volume={{ _consul_agent_config_dir | quote }}:{{ _consul_agent_config_dir | quote }}:ro \
+  --volume={{ _consul_agent_data_dir | quote }}:{{ _consul_agent_data_dir | quote }}:rw \
+  {{ _consul_agent_docker_image | quote }} \
+    agent
+ExecStop=-/usr/bin/docker stop %N
+KillMode=process
+Restart=always
+RestartSec=10
+StartLimitInterval=0
+
+[Install]
+WantedBy=multi-user.target

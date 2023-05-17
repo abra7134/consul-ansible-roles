@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+
+{{ ansible_managed | comment }}
+
+# The script to make snapshot of Consul cluster state
+
+backup_snapshot_filename="consul_backup_$(date +%Y-%m-%d_%H-%m-%s).snap"
+backup_kv_filename="consul_backup_kv_$(date +%Y-%m-%d_%H-%m-%s).json"
+backups_dir="{{ _consul_agent_backups_dir }}"
+backups_keep_count={{ consul_agent_server_backups_keep_count }}
+
+function get_backup {
+  local \
+    backups_dir="${1}" \
+    backup_snapshot_filename="${2}" \
+    backup_kv_filename="${3}"
+
+  if [ ! -d "${backups_dir}" ]
+  then
+    echo >&2 "The backup directory '${backups_dir}' doesn't exists, skipping..."
+    return 1
+  fi
+
+  cd "${backups_dir}"
+  # Get a snapshot
+  if ! \
+    consul \
+      snapshot \
+      save \
+      "${backup_snapshot_filename}"
+  then
+    echo >&2 "Unable to get snapshot"
+    return 1
+  fi
+
+  # Get a KV snapshot
+  if ! \
+    consul \
+      kv \
+      export \
+    >"${backup_kv_filename}"
+  then
+    echo >&2 "Unable to get KV snapshot"
+    return 1
+  fi
+
+  chmod --verbose 600 "${backup_kv_filename}"
+
+  # Gzipping the KV snapshot
+  if ! \
+    gzip \
+      --verbose \
+      "${backup_kv_filename}"
+  then
+    echo >&2 "Unable to archive the KV snapshot"
+    return 1
+  fi
+
+  # Remove oldest snapshots
+  if
+    backups_file_list=$(
+      ls -1 --sort=time
+    )
+  then
+    let count=0
+    while \
+      read \
+        file
+    do
+      if [ ${count} -ge $((backups_keep_count*2)) ]
+      then
+          rm --verbose "${file}"
+      fi
+      let count++
+    done \
+    <<<"${backups_file_list}"
+  fi
+
+  return 0
+}
+
+if ! \
+  raft_members=$(
+    consul \
+      operator \
+      raft \
+      list-peers
+  )
+then
+  echo >&2 "Unable to get raft members from consul cluster"
+  exit 1
+fi
+
+my_state="not found"
+while \
+  read \
+    node \
+    id \
+    address \
+    state \
+    voter \
+    raft_protocol
+do
+  if [ "${node}" = "${HOSTNAME}" ]
+  then
+    my_state="${state}"
+    break
+  fi
+done \
+<<<"${raft_members}"
+
+# !!! This temporary hack to backup all consul cluster members, not a leader only
+my_state="leader"
+
+case "${my_state}"
+in
+  "leader" )
+    get_backup \
+      "${backups_dir}" \
+      "${backup_snapshot_filename}" \
+      "${backup_kv_filename}" \
+    && exit 0
+    ;;
+  "follower" )
+    echo >&2 "This consul member is not 'leader', skipping..."
+    ;;
+  "not found" )
+    echo >&2 "This member is not found on consul cluster, skipping..."
+    ;;
+  * )
+    echo >&2 "Unknown state of consul member, skipping..."
+    ;;
+esac
+
+exit 1

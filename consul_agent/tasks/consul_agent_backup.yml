@@ -1,0 +1,35 @@
+---
+- name: "backup : Ensure directory"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0750
+  loop:
+    - "{{ _consul_agent_backups_dir }}"
+
+- name: "backup : Ensure script"
+  ansible.builtin.template:
+    src: "{{ item.lstrip('/') }}.j2"
+    dest: "{{ item }}"
+    mode: 0750
+  loop:
+    - "{{ _consul_agent_backup_script_path }}"
+
+- name: "backup : Ensure systemd'es units"
+  ansible.builtin.template:
+    src: "{{ item.lstrip('/') }}.j2"
+    dest: "{{ item }}"
+  notify: Restart 'consul-agent-backup' timer
+  loop:
+    - /etc/systemd/system/consul-agent-backup.service
+    - /etc/systemd/system/consul-agent-backup.timer
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure 'consul-agent-backup' timer is started
+  ansible.builtin.systemd:
+    name: consul-agent-backup.timer
+    daemon_reload: yes
+    enabled: yes
+    state: started

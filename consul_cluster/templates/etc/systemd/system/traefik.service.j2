@@ -1,0 +1,36 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description="the Cloud-native application proxy"
+Documentation=https://traefik.io/
+Requires=docker.service
+After=docker.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm --force %N
+ExecStart=/usr/bin/docker run \
+  --name=%N \
+  --rm=true \
+  --network=host \
+  --label=traefik.enable=True \
+  --label=traefik.http.routers.catchall.rule='PathPrefix(`/`)' \
+  --label=traefik.http.routers.catchall.priority=1 \
+  --label=traefik.http.routers.catchall.service=http-502 \
+  --label=traefik.http.services.http-502.loadbalancer.server.port=0 \
+  --volume=/var/run/docker.sock:/var/run/docker.sock:ro \
+  {{ _consul_cluster_traefik_docker_image | quote }} \
+    --accesslog=true \
+    --accesslog.format=json \
+    --api=false \
+    --api.insecure=true \
+    --global.checknewversion=false \
+    --global.sendanonymoususage=false \
+    --providers.docker=true \
+    --providers.docker.exposedByDefault=false
+ExecStop=-/usr/bin/docker stop %N
+KillMode=process
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

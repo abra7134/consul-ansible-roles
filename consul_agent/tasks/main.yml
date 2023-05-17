@@ -1,0 +1,4 @@
+---
+- ansible.builtin.import_tasks: consul_agent.yml
+  tags:
+    - consul_agent

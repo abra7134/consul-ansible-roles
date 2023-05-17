@@ -1,0 +1,12 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Timer for running a regular consul state backup
+
+[Timer]
+OnCalendar={{ consul_agent_server_backup_timer_spec }}
+RandomizedDelaySec=5 minutes
+Unit=%p.service
+
+[Install]
+WantedBy=timers.target

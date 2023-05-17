@@ -1,0 +1,122 @@
+---
+- name: Checking variables types
+  ansible.builtin.assert:
+    fail_msg: Invalid a variables type, please check
+    quiet: yes
+    that:
+      - consul_agent_acl_enabled is boolean
+      - consul_agent_token is string
+        or consul_agent_token is vault_encrypted
+      - consul_agent_datacenter is string
+      - consul_agent_primary_datacenter is string
+      - consul_agent_retry_join is sequence
+      - consul_agent_retry_join is not string
+      - consul_agent_retry_join is not mapping
+      - consul_agent_docker_labels is mapping
+      - consul_agent_is_server is boolean
+      - consul_agent_server_start_join is sequence
+      - consul_agent_server_start_join is not string
+      - consul_agent_server_start_join is not mapping
+      - consul_agent_server_start_join_wan is sequence
+      - consul_agent_server_start_join_wan is not string
+      - consul_agent_server_start_join_wan is not mapping
+      - consul_agent_server_initial_token is string
+        or consul_agent_server_initial_token is vault_encrypted
+      - consul_agent_server_enable_token_replication is boolean
+      - consul_agent_server_replication_token is string
+        or consul_agent_server_replication_token is vault_encrypted
+      - consul_agent_server_backup_timer_spec is string
+      - consul_agent_server_backups_keep_count is number
+
+- name: Ensure 'consul' system group
+  ansible.builtin.group:
+    name: consul
+    gid: "{{ _consul_agent_user_gid }}"
+
+- name: Ensure 'consul' system user
+  ansible.builtin.user:
+    name: consul
+    group: consul
+    uid: "{{ _consul_agent_user_uid }}"
+    create_home: no
+    shell: /sbin/nologin
+    comment: Consul system user
+
+- name: Ensure data and config directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: consul
+    group: consul
+    mode: 0750
+  loop:
+    - "{{ _consul_agent_config_dir }}"
+    - "{{ _consul_agent_data_dir }}"
+
+- name: Ensure the 'consul' run wrapper
+  ansible.builtin.template:
+    src: "{{ item.lstrip('/') }}.j2"
+    dest: "{{ item }}"
+    mode: 0750
+  loop:
+    - "{{ _consul_agent_wrapper_path }}"
+
+- name: Ensure backup system (for server only)
+  ansible.builtin.include_tasks:
+    file: consul_agent_backup.yml
+    apply:
+      tags:
+        - consul_agent_backup
+  when:
+    - consul_agent_is_server
+  tags:
+    - consul_agent_backup
+
+- notify: Restart 'consul-agent' service
+  tags:
+    - consul_agent_configure
+  block:
+    - name: Configure
+      ansible.builtin.template:
+        src: "{{ item.lstrip('/') }}.j2"
+        dest: "{{ item }}"
+        validate: >
+          /usr/bin/sh
+          -c ' \
+            cd `dirname %s` \
+            && \
+              /usr/local/sbin/consul \
+                validate \
+                -config-format=hcl \
+                .
+          '
+      loop:
+        - "{{ _consul_agent_config_dir }}/config.hcl"
+
+    - name: Ensure systemd'es services
+      ansible.builtin.template:
+        src: "{{ item.lstrip('/') }}.j2"
+        dest: "{{ item }}"
+      loop:
+        - /etc/systemd/system/consul-agent.service
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure 'consul-agent' service is started
+  ansible.builtin.systemd:
+    name: consul-agent.service
+    daemon_reload: yes
+    enabled: yes
+    state: started
+
+- name: Ensure 'consul-agent' container is running
+  community.docker.docker_container_info:
+    name: consul-agent
+  register: __consul_agent_status
+  until:
+    - __consul_agent_status.exists
+    - __consul_agent_status.container.State.Running
+  # Pause is required to check correctly if the docker-image is loaded
+  delay: 5
+  retries: 12

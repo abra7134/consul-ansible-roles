@@ -1,0 +1,14 @@
+---
+- name: Restart 'consul-agent' service
+  ansible.builtin.systemd:
+    daemon_reload: yes
+    enabled: yes
+    name: consul-agent.service
+    state: restarted
+
+- name: Restart 'consul-agent-backup' timer
+  ansible.builtin.systemd:
+    daemon_reload: yes
+    enabled: yes
+    name: consul-agent-backup.timer
+    state: restarted

@@ -1,0 +1,72 @@
+---
+- name: Checking variables types
+  ansible.builtin.assert:
+    fail_msg: Invalid a variables type, please check
+    quiet: yes
+    that:
+      - consul_cluster_datacenter is string
+      - consul_cluster_nodes is sequence
+      - consul_cluster_nodes is not string
+      - consul_cluster_nodes is not mapping
+      - consul_cluster_primary_datacenter is string
+      - consul_cluster_wan_nodes is sequence
+      - consul_cluster_wan_nodes is not string
+      - consul_cluster_wan_nodes is not mapping
+      - consul_cluster_role_debug is boolean
+      - consul_cluster_use_traefik_for_ui is boolean
+      - consul_cluster_backup_timer_spec is string
+      - consul_cluster_backups_keep_count is number
+      - consul_cluster_super_token is string
+        or consul_cluster_super_token is vault_encrypted
+      - consul_cluster_replication_token is string
+        or consul_cluster_replication_token is vault_encrypted
+      - consul_cluster_tokens is mapping
+
+- vars:
+    __consul_cluster_size: "{{ consul_cluster_nodes | count }}"
+  block:
+    - name: Check the cluster size (nodes amount)
+      assert:
+        fail_msg: "The cluster size must be equal 3 or 5, but not {{ __consul_cluster_size }}"
+        quiet: yes
+        that:
+          - __consul_cluster_size | int in [3, 5]
+
+    - name: Ensure the 'consul-agent' service
+      ansible.builtin.import_role:
+        name: consul_agent_v1.2.2
+      vars:
+        consul_agent_acl_enabled: yes
+        consul_agent_token: "{{ _consul_cluster_agent_token }}"
+        consul_agent_datacenter: "{{ consul_cluster_datacenter }}"
+        consul_agent_primary_datacenter: "{{ consul_cluster_primary_datacenter }}"
+        consul_agent_docker_labels:
+          traefik.enable: "{{ consul_cluster_use_traefik_for_ui }}"
+          traefik.http.middlewares.consul-agent-headers.headers.customrequestheaders.X-Consul-Token: "{{ _consul_cluster_traefik_token }}"
+          traefik.http.routers.consul-agent-auth.rule: PathPrefix(`/`) && HeadersRegexp(`X-Consul-Token`, `.+`)
+          traefik.http.routers.consul-agent-auth.service: consul-agent
+          traefik.http.routers.consul-agent-anon.rule: PathPrefix(`/`)
+          traefik.http.routers.consul-agent-anon.middlewares: consul-agent-headers
+          traefik.http.routers.consul-agent-anon.service: consul-agent
+          traefik.http.services.consul-agent.loadbalancer.server.port: 8500
+        consul_agent_is_server: yes
+        consul_agent_server_start_join: "{{ consul_cluster_nodes }}"
+        consul_agent_server_start_join_wan: "{{ consul_cluster_wan_nodes }}"
+        consul_agent_server_initial_token: "{{ consul_cluster_super_token }}"
+        consul_agent_server_enable_token_replication: yes
+        consul_agent_server_replication_token: "{{ consul_cluster_replication_token }}"
+        consul_agent_server_backup_timer_spec: "{{ consul_cluster_backup_timer_spec }}"
+        consul_agent_server_backups_keep_count: "{{ consul_cluster_backups_keep_count }}"
+
+- ansible.builtin.import_tasks: consul_cluster_acl.yml
+  tags:
+    - consul_cluster_acl
+
+- name: Ensure 'traefik' proxy for UI access
+  ansible.builtin.include_tasks:
+    file: "consul_cluster_traefik_{{ consul_cluster_use_traefik_for_ui | ternary('enable', 'disable') }}.yml"
+    apply:
+      tags:
+        - consul_cluster_traefik
+  tags:
+    - consul_cluster_traefik

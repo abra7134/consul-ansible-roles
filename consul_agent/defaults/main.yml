@@ -1,0 +1,45 @@
+---
+# Enable or not ACL system
+consul_agent_acl_enabled: no
+# Predefined token for consul agent itself
+consul_agent_token: ""
+
+# Datacenter name
+consul_agent_datacenter: dc1
+
+# The name of primary datacenter if this datacenter is secondary
+# If the datacenter is the only one, then you can leave empty
+consul_agent_primary_datacenter: ""
+
+# Specify the list of server nodes to join to
+# (used only if consul_agent_is_server == no)
+consul_agent_retry_join: []
+
+# Additional docker labels for consul agent's container
+# Used in the 'consul_cluster' role to configure the 'traefik' proxy server
+consul_agent_docker_labels: {}
+
+### SERVER MODE
+
+# Enable server mode of agent
+consul_agent_is_server: no
+# Specify the list of node to server's bootstrap
+consul_agent_server_start_join: []
+# Specify the list of node to datacenter's bootstrap
+consul_agent_server_start_join_wan: []
+
+# The managment token with super priveleges for further server configuration
+# (used only if consul_agent_acl_enabled == yes)
+consul_agent_server_initial_token: ""
+
+# Enable or not the token's replication from secondary datacenters
+# (used only if consul_agent_acl_enabled == yes and only on primary datacenter)
+consul_agent_server_enable_token_replication: no
+# The replication token for secondaries datacenters servers
+# (used only if consul_agent_acl_enabled == yes and consul_agent_server_enable_token_replication == yes)
+consul_agent_server_replication_token: ""
+
+# The timer specification of backups running (see man systemd.time)
+consul_agent_server_backup_timer_spec: hourly
+# The number of backups will be always keeped
+consul_agent_server_backups_keep_count: 10

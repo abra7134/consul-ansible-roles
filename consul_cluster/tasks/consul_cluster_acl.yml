@@ -1,0 +1,349 @@
+---
+- name: "acl : Get all ACL tokens"
+  ansible.builtin.uri:
+    headers:
+      X-Consul-Token: "{{ consul_cluster_super_token }}"
+    url: http://127.0.0.1:8500/v1/acl/tokens
+  changed_when:
+    - not __get_all_tokens_request.failed
+    - __get_all_tokens_request.status == 200
+  run_once: yes
+  register: __get_all_tokens_request
+
+- name: "acl : Get all ACL policies"
+  ansible.builtin.uri:
+    headers:
+      X-Consul-Token: "{{ consul_cluster_super_token }}"
+    url: http://127.0.0.1:8500/v1/acl/policies
+  changed_when:
+    - not __get_all_policies_request.failed
+    - __get_all_policies_request.status == 200
+  run_once: yes
+  register: __get_all_policies_request
+
+- vars:
+    # Create a simple dictionary with existing policies, by convert the Consul'es standard answer:
+    #
+    # {
+    #     "CreateIndex": 309013,
+    #     "Datacenters": [
+    #         "dc1"
+    #     ],
+    #     "Description": "Policy for 'token2-dc1' token",
+    #     "Hash": "zyQktYz0AfC8evNSy8rR6W0P1fTdyt1HGe72e/vLTYA=",
+    #     "ID": "5615adfa-1068-1b46-48a9-c6e68de0ba13",
+    #     "ModifyIndex": 309013,
+    #     "Name": "token2-dc1-policy"
+    # },
+    # {
+    #     "CreateIndex": 309014,
+    #     "Datacenters": [],
+    #     "Description": "Policy for 'token3-global' token",
+    #     "Hash": "OVEjQ5deggOtRl/yPDpogHNcoKOX4nzCXLq2NIeYhv8=",
+    #     "ID": "3dcb5542-f1c4-74b7-fcfc-fc92c39887e4",
+    #     "ModifyIndex": 309014,
+    #     "Name": "token3-global-policy"
+    # }
+    #
+    # to:
+    #
+    # {
+    #     "token2-dc1-policy": {
+    #         "id": "5615adfa-1068-1b46-48a9-c6e68de0ba13",
+    #         "local": true,
+    #         "this_datacenter": true
+    #     },
+    #     "token3-global-policy": {
+    #         "id": "3dcb5542-f1c4-74b7-fcfc-fc92c39887e4",
+    #         "local": false,
+    #         "this_datacenter": false
+    #     }
+    # }
+    #
+    __existing_policies: >
+      {{ __get_all_policies_request.json
+         | default([])
+         | json_query('[*].{key: Name, value: {id: ID, local: Datacenters!=`null` && Datacenters!=`[]`, this_datacenter: contains(Datacenters || `[]`, `' + consul_cluster_datacenter + '`)}}')
+         | items2dict
+      }}
+
+    # Create a simple dictionary with existing tokens, by convert the Consul'es standard answer:
+    #
+    # {
+    #     "AccessorID": "00000000-0000-0000-0000-000000000002",
+    #     "CreateIndex": 6,
+    #     "CreateTime": "2022-11-24T11:09:01.783441823Z",
+    #     "Description": "Anonymous Token",
+    #     "Hash": "RNVFSWnfd5DUOuB8vplp+imivlIna3fKQVnkUHh21cA=",
+    #     "Local": false,
+    #     "ModifyIndex": 6,
+    #     "SecretID": "anonymous"
+    # },
+    # {
+    #     "AccessorID": "81f21b3a-f2fe-85f9-acea-f6d9b8a480a0",
+    #     "CreateIndex": 277414,
+    #     "CreateTime": "2022-12-23T09:21:32.660692753Z",
+    #     "Description": "Token 'token2-dc1'",
+    #     "Hash": "n8nbwZyprm8Ifz77uudQWxX8nprAskSEmq4h6soR6wo=",
+    #     "Local": true,
+    #     "ModifyIndex": 277616,
+    #     "Policies": [
+    #         {
+    #             "ID": "5b7b9eb4-20d4-5860-34b6-868a1c5fa412",
+    #             "Name": "token2-dc1-policy"
+    #         }
+    #     ],
+    #     "SecretID": "b26258ee-f21c-4d0d-8387-d3ec6161de4d"
+    # }
+    #
+    # to simple dictionary:
+    #
+    # {
+    #     "anonymous": {
+    #         "accessorid": "00000000-0000-0000-0000-000000000002",
+    #         "description": "Anonymous Token",
+    #         "local": false
+    #     },
+    #     "b26258ee-f21c-4d0d-8387-d3ec6161de4d": {
+    #         "accessorid": "81f21b3a-f2fe-85f9-acea-f6d9b8a480a0",
+    #         "description": "Token 'token2-dc1'",
+    #         "local": true
+    #     },
+    # }
+    #
+    __existing_tokens: >
+      {{ __get_all_tokens_request.json
+         | default([])
+         | json_query('[*].{key: SecretID, value: {accessorid: AccessorID, description: Description || ``, local: Local}}')
+         | items2dict
+      }}
+
+    # The dictionary with internal predefined tokens for consul'es agent itself, traefik and replication work
+    __internal_tokens: >
+      {{ {}
+         | combine({
+             _consul_cluster_agent_token_name: {
+                'token': _consul_cluster_agent_token,
+                'rules': _consul_cluster_agent_policy_rules,
+                'local': true
+             },
+             _consul_cluster_traefik_token_name: {
+                'token': _consul_cluster_traefik_token,
+                'rules': _consul_cluster_traefik_policy_rules,
+                'local': true
+             }
+           })
+         | combine({
+             _consul_cluster_replication_token_name: {
+                'token': _consul_cluster_replication_token,
+                'rules': _consul_cluster_replication_policy_rules,
+                'local': true
+             }
+           } if consul_cluster_primary_datacenter in ('', consul_cluster_datacenter) else {}
+           )
+      }}
+
+    # Create a dictionary of all predifined tokens with internal tokens, but ignoring those with an empty token
+    # and update the token name and it's local parameter (set to default value if it absent)
+    #
+    # {
+    #      "token2-dc1": {
+    #          "local": true,
+    #          "rules": "node_prefix \"\" { policy = \"write\" }\n",
+    #          "token": "b26258ee-f21c-4d0d-8387-d3ec6161de4d"
+    #      },
+    #      "token3-global": {
+    #          "local": false,
+    #          "rules": "node_prefix \"\" { policy = \"write\" }\n",
+    #          "token": "cf401b88-eaca-459e-9cb2-c3c7026b1e05"
+    #      }
+    # }
+    #
+    __predefined_tokens: >
+      {{ consul_cluster_tokens
+         | combine(__internal_tokens)
+         | dict2items
+         | json_query('[?value.token!=``].{key: key, value: merge(value, {"local": value.local || `false`}) }')
+         | json_query('[*].{key: join(`-`, [key, value.local && `' + consul_cluster_datacenter + '` || `global`]), value: value}')
+         | items2dict
+      }}
+
+    # Create a dictionaty with all policies which predefined in '__predifined_tokens' variable with a convenient format:
+    # On all policy names will be added a '-policy' suffix
+    #
+    # {
+    #    "ui-policy": {
+    #        "local": false,
+    #        "token_name": "ui",
+    #        "rules": "service_prefix \"\" { policy = \"read\" }\nkey_prefix \"\" { policy = \"read\" }\nnode_prefix \"\" { policy = \"read\" }\n"
+    #    },
+    #    "ui2-policy": {
+    #        "local": false,
+    #        "token_name": "ui2",
+    #        "rules": "service_prefix \"\" { policy = \"read\" } key_prefix \"\" { policy = \"read\" } node_prefix \"\" { policy = \"read\" }"
+    # }
+    #
+    __predefined_policies: >
+      {{ __predefined_tokens
+         | dict2items
+         | json_query('[?value.rules!=null].{key: join(`-`, [key, `policy`]), value: {token_name: key, local: value.local, rules: value.rules}}')
+         | items2dict
+      }}
+
+    # The dictionary map (token_name -> [{"Name": "token_policy"}]) for easly access to Consul'es API
+    #
+    # {
+    #   "ui": [{"Name": "ui-policy"}],
+    #   "ui2": [{"Name": "ui2-policy"}]
+    # }
+    #
+    __predefined_policies_map: >
+      {{ __predefined_policies
+         | dict2items
+         | json_query('[*].{key: value.token_name, value: [{Name: key || ``}]}')
+         | items2dict
+      }}
+
+  run_once: yes
+  block:
+    - name: "acl : Debug all __special variables"
+      debug:
+        var: "{{ item }}"
+      loop:
+        - __get_all_tokens_request
+        - __get_all_policies_request
+        - __existing_policies
+        - __existing_tokens
+        - __internal_tokens
+        - __predefined_tokens
+        - __predefined_policies
+        - __predefined_policies_map
+      when:
+        - consul_cluster_role_debug
+
+    - name: "acl : Create/Update ACL policies"
+      ansible.builtin.uri:
+        body: "{{ __policy_schema | to_json }}"
+        body_format: json
+        headers:
+          X-Consul-Token: "{{ consul_cluster_super_token }}"
+        method: PUT
+        url: "http://127.0.0.1:8500/v1/acl/policy/{{ __existing_policies[__policy_name].id | default('') }}"
+      register: __self
+      changed_when:
+        - not __self.failed
+        - __self.status == 200
+      vars:
+        __policy_schema:
+            # Schema see at https://developer.hashicorp.com/consul/api-docs/acl/policies#create-a-policy
+            Datacenters: "{{ item.value.local | ternary([consul_cluster_datacenter], []) }}"
+            Description: "Policy for '{{ item.value.token_name }}' token"
+            Name: "{{ __policy_name }}"
+            Rules: "{{ item.value.rules }}"
+        __policy_name: "{{ item.key }}"
+      loop: "{{ __predefined_policies | dict2items }}"
+      loop_control:
+        label: "{{ __policy_name }}"
+      when:
+        - item.value.local
+          or consul_cluster_primary_datacenter in ('', consul_cluster_datacenter)
+
+    - name: "acl : Delete ACL tokens with changed 'local' parameters"
+      ansible.builtin.uri:
+        headers:
+          X-Consul-Token: "{{ consul_cluster_super_token }}"
+        method: DELETE
+        url: "http://127.0.0.1:8500/v1/acl/token/{{ __existing_tokens[item.value.token].accessorid }}"
+      register: __self
+      changed_when:
+        - not __self.failed
+        - __self.status == 200
+      loop: "{{ __predefined_tokens | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - __existing_tokens[item.value.token].accessorid is defined
+        - __existing_tokens[item.value.token].local != item.value.local
+
+    - name: "acl : Create/Update ACL tokens"
+      ansible.builtin.uri:
+        body: "{{ __token_schema | to_json }}"
+        body_format: json
+        headers:
+          X-Consul-Token: "{{ consul_cluster_super_token }}"
+        method: PUT
+        url: |
+          {% if __existing_tokens[item.value.token].accessorid is defined
+                and __existing_tokens[item.value.token].local == item.value.local %}
+          http://127.0.0.1:8500/v1/acl/token/{{ __existing_tokens[item.value.token].accessorid }}
+          {% else %}
+          http://127.0.0.1:8500/v1/acl/token/
+          {% endif %}
+      register: __self
+      changed_when:
+        - not __self.failed
+        - __self.status == 200
+      vars:
+        __token_schema:
+            # Schema see at https://developer.hashicorp.com/consul/api-docs/acl/tokens#create-a-token
+            Description: "Token '{{ __token_name }}'"
+            # This field is immutable so specify it only on token creating
+            ExpirationTTL: "{{ __existing_tokens[item.value.token] is defined | ternary('0s', item.value.expirationttl | default('0s')) }}"
+            # The 'Local' value must match the existing value or the request will return an error
+            # therefore, in the previous step, we pre-delete such tokens
+            Local: "{{ item.value.local }}"
+            Policies: "{{ __predefined_policies_map[__token_name] | default([]) }}"
+            SecretID: "{{ item.value.token }}"
+        __token_name: "{{ item.key }}"
+      loop: "{{ __predefined_tokens | dict2items }}"
+      loop_control:
+        label: "{{ __token_name }}"
+      when:
+        - item.value.local
+          or consul_cluster_primary_datacenter in ('', consul_cluster_datacenter)
+
+    - name: "acl : Delete an unnecessary ACL tokens"
+      ansible.builtin.uri:
+        headers:
+          X-Consul-Token: "{{ consul_cluster_super_token }}"
+        method: DELETE
+        url: "http://127.0.0.1:8500/v1/acl/token/{{ item.value.accessorid }}"
+      register: __self
+      changed_when:
+        - not __self.failed
+        - __self.status == 200
+      loop: |
+        {{ __existing_tokens
+           | dict2items
+           | rejectattr('key', 'equalto', 'anonymous')
+           | rejectattr('key', 'equalto', consul_cluster_super_token)
+           | rejectattr('key', 'in', __predefined_tokens | dict2items | map(attribute='value.token') | list)
+        }}
+      loop_control:
+        label: "{{ item.key }} ({{ item.value.description }})"
+      when:
+        - item.value.local
+          or consul_cluster_primary_datacenter in ('', consul_cluster_datacenter)
+
+    - name: "acl : Delete an unnecessary ACL policies"
+      ansible.builtin.uri:
+        headers:
+          X-Consul-Token: "{{ consul_cluster_super_token }}"
+        method: DELETE
+        url: "http://127.0.0.1:8500/v1/acl/policy/{{ item.value.id }}"
+      register: __self
+      changed_when:
+        - not __self.failed
+        - __self.status == 200
+      loop: |
+        {{ __existing_policies
+           | dict2items
+           | rejectattr('key', 'equalto', 'global-management')
+           | rejectattr('key', 'in', __predefined_policies)
+        }}
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - consul_cluster_primary_datacenter in ('', consul_cluster_datacenter)
+          and not item.value.local
+          or item.value.this_datacenter
